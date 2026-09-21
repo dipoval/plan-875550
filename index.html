@@ -201,7 +201,7 @@
   .hoy-head .desc{margin-top:4px; color:var(--ink-2); font-size:13px;}
   .hoy-head-row{display:flex; align-items:center; justify-content:space-between; gap:10px;}
 
-  .progress-ring{position:sticky; top:60px; z-index:55; display:grid; place-items:center; width:40px; height:40px; flex:0 0 auto;}
+  .progress-ring{display:grid; place-items:center; width:40px; height:40px; flex:0 0 auto;}
   .progress-ring svg{grid-area:1/1; transform:rotate(-90deg);}
   .progress-ring-track{fill:none; stroke:var(--line); stroke-width:3;}
   .progress-ring-fill{fill:none; stroke:var(--accent); stroke-width:3; stroke-linecap:round; transition:stroke-dashoffset .3s ease;}
@@ -1373,8 +1373,12 @@
     }
 
     var DOW_LETTERS = ["L","M","X","J","V","S","D"];
+    function dowShortLabel(label, dow){
+      var m = /^Día\s*(\d+)/.exec(label);
+      return m ? m[1] : DOW_LETTERS[dow-1];
+    }
     function glyphForType(type){ return type==="gym" ? "●" : (type==="casa" ? "△" : "Z"); }
-    function typeLabel(type){ return type==="gym" ? "gimnasio" : (type==="casa" ? "casa" : "descanso"); }
+    function typeLabel(type){ return type==="gym" ? COPY.chipGym.toLowerCase() : (type==="casa" ? COPY.chipHome.toLowerCase() : "descanso"); }
 
     function renderWeekStrip(){
       var days = Schedule.weekCircleData(hoyState.programDay);
@@ -1388,7 +1392,7 @@
           '<button type="button" class="'+cls+'" data-preview-pd="'+d.programDay+'" aria-label="'+d.label+', '+typeLabel(d.type)+', '+stateLabel+'">'+
             glyphForType(d.type)+
           '</button>'+
-          '<span class="week-strip-dow">'+DOW_LETTERS[d.dow-1]+'</span>'+
+          '<span class="week-strip-dow">'+dowShortLabel(d.label, d.dow)+'</span>'+
         '</div>';
       }).join("");
       document.getElementById("weekStrip").innerHTML = html;
@@ -1501,8 +1505,8 @@
         mount.innerHTML = '<div class="wk-card"><div class="section-kicker" style="margin-top:14px;">'+day.short+waveNote+'</div>'+cards+'</div>';
       }
 
-      document.getElementById("dayPrev").disabled = (pd<=1);
-      document.getElementById("dayNext").disabled = (pd>=Schedule.TOTAL_PROGRAM_DAYS);
+      document.getElementById("dayPrev").disabled = (hoyState.programDay<=1);
+      document.getElementById("dayNext").disabled = (hoyState.programDay>=Schedule.TOTAL_PROGRAM_DAYS);
 
       recalcRungLabels();
       wireRungChecks();
