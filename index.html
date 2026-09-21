@@ -199,6 +199,23 @@
   .hoy-head{margin-bottom:4px;}
   .hoy-head h2{font-size:20px;}
   .hoy-head .desc{margin-top:4px; color:var(--ink-2); font-size:13px;}
+  .hoy-head-row{display:flex; align-items:center; justify-content:space-between; gap:10px;}
+
+  .progress-ring{position:sticky; top:60px; z-index:55; display:grid; place-items:center; width:40px; height:40px; flex:0 0 auto;}
+  .progress-ring svg{grid-area:1/1; transform:rotate(-90deg);}
+  .progress-ring-track{fill:none; stroke:var(--line); stroke-width:3;}
+  .progress-ring-fill{fill:none; stroke:var(--accent); stroke-width:3; stroke-linecap:round; transition:stroke-dashoffset .3s ease;}
+  .progress-ring-label{grid-area:1/1; font-size:11px; font-weight:650; color:var(--ink);}
+
+  .week-strip{display:flex; justify-content:space-between; gap:4px; margin-top:10px;}
+  .week-strip-day{display:flex; flex-direction:column; align-items:center; gap:4px; flex:1;}
+  .day-circle{width:36px; height:36px; border-radius:50%; border:1.2pt solid var(--line); background:var(--surface); color:var(--ink-3); font-size:14px; display:flex; align-items:center; justify-content:center; cursor:pointer; padding:0;}
+  .day-circle.is-done{background:var(--accent-tint); border-color:var(--accent); color:var(--accent);}
+  .day-circle.is-today{border-color:var(--accent); border-width:2pt; color:var(--ink);}
+  .day-circle.is-preview{box-shadow:0 0 0 2px var(--accent-tint);}
+  .week-strip-dow{font-size:10.5px; color:var(--ink-3);}
+
+  .preview-banner{margin-top:8px; font-size:12.5px; color:var(--ink-2);}
 
   .banner{border-radius:var(--radius-m); padding:12px 14px; font-size:12.8px; margin-top:12px; line-height:1.4;}
   .banner b{display:block; font-size:13.3px; margin-bottom:2px;}
@@ -310,8 +327,18 @@
   <section class="tab-panel is-active" data-tab="hoy" id="panel-hoy">
     <div class="wrap-narrow">
       <div class="hoy-head">
-        <h2 id="seqTitle">Tu rutina de hoy</h2>
-        <p class="desc" id="seqSubtitle">Semana 1 · Día 1 de 7</p>
+        <div class="hoy-head-row">
+          <h2 id="seqTitle">Tu rutina de hoy</h2>
+          <div class="progress-ring" id="progressRing" role="img">
+            <svg viewBox="0 0 40 40" width="40" height="40">
+              <circle class="progress-ring-track" cx="20" cy="20" r="16"></circle>
+              <circle class="progress-ring-fill" id="progressRingFill" cx="20" cy="20" r="16"></circle>
+            </svg>
+            <span class="progress-ring-label" id="progressRingLabel">1</span>
+          </div>
+        </div>
+        <div class="week-strip" id="weekStrip" role="group" aria-label="Días de esta semana"></div>
+        <div id="previewBanner"></div>
       </div>
 
       <div class="callout callout-accent" style="margin-top:12px;">
@@ -883,7 +910,24 @@
       var day = block.dias.filter(function(d){ return d.id===dayId; })[0];
       return {type:"gym", day:day};
     }
-    return { TOTAL_PROGRAM_DAYS: TOTAL_PROGRAM_DAYS, blockForWeek: blockForWeek, weekFromProgramDay: weekFromProgramDay, dowFromProgramDay: dowFromProgramDay, resolveSession: resolveSession };
+    // Arma los 7 días (lunes→domingo) de la semana que contiene programDay,
+    // reutilizando resolveSession/WEEK_TEMPLATE — nunca una tabla nueva
+    // (ver comentario de resolveSession arriba). TOTAL_PROGRAM_DAYS=168=24×7
+    // exacto, así que ninguna semana cruza un límite de bloque a medio camino.
+    function weekCircleData(programDay){
+      var dow = dowFromProgramDay(programDay);
+      var weekStartPD = programDay - (dow - 1);
+      var days = [];
+      for(var i = 0; i < 7; i++){
+        var pd = weekStartPD + i;
+        var week = weekFromProgramDay(pd);
+        var block = blockForWeek(week);
+        var session = resolveSession(block, i + 1);
+        days.push({ programDay: pd, dow: i + 1, type: session.type, label: WEEK_TEMPLATE[i].num });
+      }
+      return days;
+    }
+    return { TOTAL_PROGRAM_DAYS: TOTAL_PROGRAM_DAYS, blockForWeek: blockForWeek, weekFromProgramDay: weekFromProgramDay, dowFromProgramDay: dowFromProgramDay, resolveSession: resolveSession, weekCircleData: weekCircleData };
   })();
 
   var Progression = (function(){
@@ -1221,7 +1265,7 @@
   })();
 
   var RenderHoy = (function(){
-    var hoyState = { programDay:1 };
+    var hoyState = { programDay:1, previewProgramDay:null };
 
     function loadHoyState(){
       var pd = parseInt(Storage.lsGet("plan_day_seq"),10);
@@ -1328,14 +1372,75 @@
       '</div>';
     }
 
+    var DOW_LETTERS = ["L","M","X","J","V","S","D"];
+    function glyphForType(type){ return type==="gym" ? "●" : (type==="casa" ? "△" : "Z"); }
+    function typeLabel(type){ return type==="gym" ? "gimnasio" : (type==="casa" ? "casa" : "descanso"); }
+
+    function renderWeekStrip(){
+      var days = Schedule.weekCircleData(hoyState.programDay);
+      var html = days.map(function(d){
+        var isDone = d.programDay < hoyState.programDay;
+        var isToday = d.programDay === hoyState.programDay;
+        var isPreview = hoyState.previewProgramDay !== null && d.programDay === hoyState.previewProgramDay;
+        var cls = "day-circle" + (isDone?" is-done":"") + (isToday?" is-today":"") + (isPreview?" is-preview":"");
+        var stateLabel = isDone ? "hecho" : (isToday ? "hoy" : "pendiente");
+        return '<div class="week-strip-day">'+
+          '<button type="button" class="'+cls+'" data-preview-pd="'+d.programDay+'" aria-label="'+d.label+', '+typeLabel(d.type)+', '+stateLabel+'">'+
+            glyphForType(d.type)+
+          '</button>'+
+          '<span class="week-strip-dow">'+DOW_LETTERS[d.dow-1]+'</span>'+
+        '</div>';
+      }).join("");
+      document.getElementById("weekStrip").innerHTML = html;
+    }
+
+    function renderPreviewBanner(){
+      var el = document.getElementById("previewBanner");
+      if(hoyState.previewProgramDay === null || hoyState.previewProgramDay === hoyState.programDay){
+        el.innerHTML = "";
+        return;
+      }
+      var days = Schedule.weekCircleData(hoyState.programDay);
+      var previewed = days.filter(function(d){ return d.programDay === hoyState.previewProgramDay; })[0];
+      el.innerHTML = '<p class="preview-banner">Viendo: '+previewed.label.toLowerCase()+' · <button type="button" class="btnlink" id="previewBackBtn">Volver a hoy</button></p>';
+      document.getElementById("previewBackBtn").addEventListener("click", function(){
+        hoyState.previewProgramDay = null;
+        renderToday();
+      });
+    }
+
+    function renderProgressRing(){
+      var week = Schedule.weekFromProgramDay(hoyState.programDay);
+      var pct = Math.round((hoyState.programDay-1) / Schedule.TOTAL_PROGRAM_DAYS * 100);
+      var circumference = 2*Math.PI*16;
+      var offset = circumference * (1 - pct/100);
+      var fill = document.getElementById("progressRingFill");
+      fill.style.strokeDasharray = circumference.toFixed(2);
+      fill.style.strokeDashoffset = offset.toFixed(2);
+      document.getElementById("progressRingLabel").textContent = String(week);
+      document.getElementById("progressRing").setAttribute("aria-label", "Semana "+week+" de 24 · "+pct+"% del programa completado");
+    }
+
+    function wireWeekStrip(){
+      document.getElementById("weekStrip").addEventListener("click", function(e){
+        var btn = e.target.closest("[data-preview-pd]");
+        if(!btn) return;
+        var pd = Number(btn.getAttribute("data-preview-pd"));
+        hoyState.previewProgramDay = (pd === hoyState.programDay) ? null : pd;
+        renderToday();
+      });
+    }
+
     function renderToday(){
-      var pd = hoyState.programDay;
+      var pd = hoyState.previewProgramDay || hoyState.programDay;
       var week = Schedule.weekFromProgramDay(pd);
       var dow = Schedule.dowFromProgramDay(pd);
       var block = Schedule.blockForWeek(week);
       var session = Schedule.resolveSession(block, dow);
 
-      document.getElementById("seqSubtitle").textContent = "Semana "+week+" de 24 · Día "+dow+" de 7 de tu ciclo";
+      renderWeekStrip();
+      renderPreviewBanner();
+      renderProgressRing();
       renderWeekBanners(week);
       document.getElementById("blockTag").innerHTML = 'Bloque '+block.id+' · <b>'+block.nombre+'</b> ('+block.sub+') — '+block.weeks;
 
@@ -1450,6 +1555,7 @@
 
     function goToProgramDay(pd){
       hoyState.programDay = Math.max(1, Math.min(Schedule.TOTAL_PROGRAM_DAYS, pd));
+      hoyState.previewProgramDay = null;
       saveProgramDay();
       renderToday();
     }
@@ -1468,6 +1574,7 @@
       loadHoyState: loadHoyState,
       saveProgramDay: saveProgramDay,
       wireSeqNav: wireSeqNav,
+      wireWeekStrip: wireWeekStrip,
       wireRungChecks: wireRungChecks,
       wireNivelSelects: wireNivelSelects,
       wireGotoRM: wireGotoRM
@@ -1526,6 +1633,7 @@
 
     RenderHoy.loadHoyState();
     RenderHoy.wireSeqNav();
+    RenderHoy.wireWeekStrip();
     RenderHoy.renderToday();
 
     Tabs.wireTabs();
